@@ -1,0 +1,257 @@
+---
+title: "Multiple Linear Regression and Partial Depencence Plot for Yield based on Reliability"
+author: "Francesco Palermo"
+date: "5 October 2020"
+output: html_document
+---
+
+
+
+One solution for interpreting black box models is to approximate them with an interpretable model. After seeing Decision Tree, let's have a look at another interpretable model which is Multiple Linear Regression 
+
+This approach aims to find out some relationship between input parameters and output by using some Machine Learning methods. 
+
+It is important to emphasize that the goal is not building a good model for prediction, but only look at the *FEATURE IMPORTANCE* to try to identify which predictors have an impact on the dependent variable.
+
+### READING DATASET
+
+Let's read the data. Only the most correlated predictors to the output variable will be examined. We want to try to express *Yield* as linear combination of some input parameters.
+```{r}
+water <- read.csv("df_Reliability.csv",header=T)
+names(water) <- c("RESTRICTIONL1StorageTrig","SHT_STOR_TRIG_Pumping","DS1_b_Storage_Trig","SHT_Upgrade_Flag","Yield")
+water$SHT_Upgrade_Flag <- as.factor(water$SHT_Upgrade_Flag)
+dim(water)
+```
+The most promising linear regression looks like the following:
+```{r}
+model1 <- lm(Yield ~ RESTRICTIONL1StorageTrig+SHT_STOR_TRIG_Pumping+DS1_b_Storage_Trig+factor(SHT_Upgrade_Flag),data=water)
+```
+
+Before interpreting the parameters, let's check Model Diagostic too see if the assumptions of the Linear model are satisfied:
+
+### MODEL DIAGNOSTIC
+```{r}
+op=par(mfrow=c(1,2)) 
+plot(model1,which=1:2)
+```
+
+**Residuals vs fitted plot**. 
+If the *homoscedasticity* (constant variance of residuals) is met, we should see no pattern in the points. It looks like that the cloud of points appears random. Hence, the homoscedasticity assumption is satisfied.
+
+If the *linearity assumption* were met (linearity between output and predictors), we should see a fairly flat red line. This is quite the case here.
+
+**QQ-Plots**.
+Based on the fact that the points shown a fairly linear trend, the normality of random errors is met.
+
+The assumptions of the linear regression are met, hence the interpretation of his parameter is given below.
+
+### MODEL INTERPRETATION
+```{r}
+summary(model1)
+```
+Each parameter is **highly significant**. In addition, the higher R-squared, the better the model explains the data. 
+
+Based on the obtained R-SQUARED (0.9684), the selected predictors are able to explain *Yield* almost perfectly and therefore the linear regression approximates the underlying black box behavior very well.
+
+
+The **importance of a feature** in a linear regression model can be measured by the absolute value of its t-statistic. Let's interpret the regression coefficients (expect the intercept):
+
+* The effect of an increase in *RESTRICTIONL1StorageTrig* of 0.1 is a decrease in expected **Yield** of 89227.3 ML
+
+* The effect of an increase in *SHT_STOR_TRIG_Pumping* of 0.1 is an increase in expected **Yield** of 22108.8 ML
+
+* The effect of an increase in *DS1_b_Storage_Trig* of 0.1 is an increase in expected **Yield** of 18606.1 ML
+
+* The effect of being in *SHT_Upgrade_Flag=2*, compared with *SHT_Upgrade_Flag=1*, is an increase in expected **Yield** of 25848.3 ML
+
+* The effect of being in *SHT_Upgrade_Flag=3*, compared with *SHT_Upgrade_Flag=1*, is an increase in expected **Yield** of 37833.6 ML 
+The following **WEIGHT PLOT** grahically display what said above
+```{r, echo=FALSE}
+pretty_rownames = function(rnames){
+  rnames = gsub('^`', '', rnames)
+  rnames = gsub('`$', '', rnames)
+  rnames = gsub('`', ':', rnames)
+  rnames
+}
+coef_plot = function(mod, alpha = 0.05, remove_intercept = TRUE,cat_var=TRUE,confInt=FALSE){
+  lm_summary = summary(mod)$coefficients
+  rownames(lm_summary) = pretty_rownames(rownames(lm_summary))
+  
+  df = data.frame(Features = rownames(lm_summary),
+                  Estimate = lm_summary[,'Estimate']/10,
+                  std_error = lm_summary[,'Std. Error'])
+  if(cat_var){
+    cond=grepl("factor", df$Features)
+    df[cond,'Estimate']<-df[cond,]['Estimate']*10
+  }
+  
+  if(remove_intercept){
+    df = df[!(df$Features == '(Intercept)'),]
+  }
+
+  
+  df$lower = df$Estimate - qnorm(alpha/2) * (df$std_error*1/10)
+  df$upper = df$Estimate + qnorm(alpha/2) * (df$std_error*1/10)
+  
+  if(confInt){
+  conf_inter <- rbind(df$upper,df$lower)
+  rownames(conf_inter) <- c("Lower_bound","Upper_bound")
+  colnames(conf_inter) <- df$Features
+  return(conf_inter)
+  }
+  
+
+  require("ggplot2")
+  ggplot(df) +
+    geom_vline(xintercept=0, linetype=4) +
+    geom_point(aes(x=Estimate, y=Features)) +
+    geom_segment(aes(y=Features, yend=Features, x=lower, xend=upper), arrow = arrow(angle=90, ends='both', length = unit(0.1, 'cm'))) +
+    scale_x_continuous('Weight estimate',labels = scales::comma,n.breaks=6) +
+    ggtitle("Weight Plot")+
+    my_theme()
+  
+}
+# load libraries
+library("ggplot2")
+library("viridis")
+
+# define graphics theme
+my_theme = function(legend.position='right'){
+  theme_bw() %+replace%
+    theme(legend.position=legend.position)+
+    theme(axis.text = element_text(size = 10), 
+          axis.title = element_text(size = 12),
+          plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+}
+
+theme_set(my_theme())
+
+
+default_color = "azure4"
+```
+```{r}
+coef_plot(model1,cat_var=TRUE,confInt=FALSE)
+#confInt=TRUE shows the CONFIDENCE INTERVALS::CAUTIONS FOR CATEGORICAL DATA
+```
+
+The (adjusted) weights are displayed as estimate points and the 95% confidence intervals as lines. For example, the effect of an increase in *RESTRICTIONL1StorageTrig* of 0.1 is a decrease in expected **Yield** of -89227.3 ML (point estimate) with a 95% confident range of [-89999.84,-88454.68].
+
+The fitted line is displayed below and it can be used to try to estimate **Yield** by using different combination of input parameters. Just an example (with values from the decision rule shown in Python) is shown below:
+
+```{r}
+coeffs = coefficients(model1)
+RESTR1=0.5
+SHT_PUMP=0.6
+DS1_b=0.8
+Flag1=0
+Flag2=0
+Flag3=1
+yield_hat = coeffs[1] + coeffs[2]*RESTR1 + coeffs[3]*SHT_PUMP+ coeffs[4]*DS1_b + coeffs[5]*Flag2 + coeffs[6]*Flag3
+names(yield_hat) <- "Prediction"
+yield_hat
+```
+In that particular Decision Tree rule the expected value of Yield was around 739951. The regression prediction is close to that expected value.
+
+### POSSIBLE INTERACTION 
+The above model did not include any interaction between variables. **Interaction** occurs for example when the relationship between y and a continuous covariate x1 is different for different values of another, categorical, covariate x2.
+
+Let's check graphically if any interaction between variables is present. If the lines shows same (or similar) slope no interaction between variables occurs.
+
+```{r}
+model_interact <- lm(Yield ~ RESTRICTIONL1StorageTrig*factor(SHT_Upgrade_Flag),data=water)
+plot(Yield ~ RESTRICTIONL1StorageTrig, data=water,main="Possible interactions")
+lines(fitted(model_interact)[SHT_Upgrade_Flag=="1"]~RESTRICTIONL1StorageTrig[SHT_Upgrade_Flag=="1"],data=water,col="red")
+lines(fitted(model_interact)[SHT_Upgrade_Flag=="2"]~RESTRICTIONL1StorageTrig[SHT_Upgrade_Flag=="2"],data=water,col="blue")
+lines(fitted(model_interact)[SHT_Upgrade_Flag=="3"]~RESTRICTIONL1StorageTrig[SHT_Upgrade_Flag=="3"],data=water,col="green")
+legend("bottomleft",legend=c("1","2","3"),lty=1,col=c("red","blue","Green"))
+```
+By trying different combinations, it looks like no variable interactions help adding more information in regards to **Yield**.
+
+In addition, one way to estimate the interaction strength is to measure how much of the variation of the prediction depends on the interaction of the features. This measurement is called H-statistic and it gives a value between 0 and 1 for each involved variable.
+```{r, echo=FALSE,results = FALSE,message=FALSE,warning=FALSE}
+library("mlr")
+library("iml")
+library("ggplot2")
+
+water.task = makeRegrTask(data = water, target = "Yield")
+mod.water = mlr::train(mlr::makeLearner(cl = 'regr.randomForest', id = 'water-rf'), water.task)
+
+pred.water = Predictor$new(mod.water, data = water[setdiff(colnames(water), "Yield")])
+ia = Interaction$new(pred.water, grid.size = 50) 
+```
+```{r}
+plot(ia) +
+  scale_y_discrete("") +
+  ggtitle("H-STATISTIC Overall interaction strenght")
+```
+Overall, the interaction effects between the features are very weak (below 15% of variance explained per feature).
+
+### PARTIAL DEPENDENCE PLOT (PDP)
+The partial dependence plot (short PDP or PD plot) shows the marginal effect one or two features have on the predicted outcome of a machine learning model. 
+
+We have used a Random Forest model to approximate the underlying model by using the best 4 predictors. Only the PDPs plot on the 3 continuous predictors will be displayed.
+
+```{r setup, echo=FALSE}
+library("mlr")
+library("iml")
+library("ggplot2")
+water.task = makeRegrTask(data = water, target = "Yield")
+mod.water = mlr::train(mlr::makeLearner(cl = 'regr.randomForest', id = 'water-rf'), water.task)
+pred.water = Predictor$new(mod.water, data = water)
+pdp_function = function(var,low,up){
+  pdp = FeatureEffect$new(pred.water, var, method = "pdp")
+  p1 = pdp$plot() +  
+  scale_x_continuous(var, limits = c(low, up)) 
+  p1}
+```
+```{r}
+p1=pdp_function('RESTRICTIONL1StorageTrig',0.3,0.65)
+p2=pdp_function('SHT_STOR_TRIG_Pumping',0.3,1)
+p3=pdp_function('DS1_b_Storage_Trig',0.5,1)
+gridExtra::grid.arrange(p1, p2,p3, ncol = 3,top = "Marginal effects of best predictors on Yield")
+```
+
+All of these plots shows a quite linear marginal effect, with *RESTRICTIONL1StorageTrig* showing (as expected) a negative linear trend.
+
+We need to be aware of situations where there are few data observations. In this situation the machine learning model could probably not learn a meaningful prediction for that range. 
+
+By looking at the first graph, the fact that the predicted yield is flattening may be caused by the fact that we obtained few observations with *RESTRICTIONL1StorageTrig* < 0.3.
+
+It is also possible to illustrate the partial dependence plot with a categorical feature (*SHT_Upgrade_Flag*), but the EDA shown in the Python script provides better insights.
+
+Finally, we can also visualize the partial dependence of two features at once (other 2 combination can be visualized):
+```{r}
+pd = FeatureEffect$new(pred.water, c("RESTRICTIONL1StorageTrig", "SHT_STOR_TRIG_Pumping"), method = "pdp") 
+pd$plot() +
+  scale_fill_viridis(option = "D")+
+  ggtitle("Combined marginal effects of best two predictors on Yield")
+```
+
+Clearly the yellow colour shows combination where the **Yield** is very high, while the dark blue colour shows the opposite scenario.
+
+This graph helps the decision makers to find the appropriate/optimal/feasible trade off between two decision variables (for example here between *RESTRICTIONL1StorageTrig* and *SHT_STOR_TRIG_Pumping*)
+
+
+### Individual Conditional Expectation (ICE)
+
+Individual Conditional Expectation (ICE) plots display one line per instance that shows how the instance's prediction changes when a feature changes.
+
+The PDP for the average effect of a feature is a global method because it does not focus on specific instances, but on an overall average.A PDP is the average of the lines of an ICE plot.
+
+```{r}
+water.subset.index = sample(1:nrow(water), size = 100)
+water.subset = water[water.subset.index,]
+water.task = makeRegrTask(data = water, target = "Yield")
+water.pr = mlr::train(mlr::makeLearner(cl = 'regr.randomForest', id = 'water-rf'), water.task)
+water.pr = Predictor$new(mod.water, water.subset)
+
+p1 = FeatureEffect$new(water.pr, "RESTRICTIONL1StorageTrig", method = "ice")$plot() + scale_x_continuous("RESTRICTIONL1StorageTrig") + 
+  scale_y_continuous("Yield")
+p2 = FeatureEffect$new(water.pr, "SHT_STOR_TRIG_Pumping", method = "ice")$plot() + scale_x_continuous("SHT_STOR_TRIG_Pumping") + scale_y_continuous("")
+p3 = FeatureEffect$new(water.pr, "DS1_b_Storage_Trig", method = "ice")$plot() + scale_x_continuous("DS1_b_Storage_Trig")+ scale_y_continuous("")
+gridExtra::grid.arrange(p1, p2, p3, ncol = 3)
+``` 
+
+PDP can obscure some possible interactions between the variables involved (since it is only an average). Individual Conditional Expectation (ICE) plots can highlight some strange behaviour in the data.
+
+All curves seem to follow the same course, so there are no obvious interactions or any anomalies. That means that the PDP is already a good summary of the relationships between the displayed features and the predicted Yield.
